@@ -47,19 +47,36 @@ This lets PX Dictate capture the `fn` key as a hotkey.
 
 ## Quick Start
 
-### Prerequisites
+### Option A: One-Command Installer (recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/pxinnovative/px-dictate/master/install.sh | bash
+```
+
+The installer walks you through each step with confirmations. It will:
+1. Check your system (macOS, Python, architecture)
+2. Install Homebrew (if needed)
+3. Install dependencies (`whisper-cpp`, `portaudio`, `ffmpeg`, Python packages)
+4. Download a Whisper model (you choose the size)
+5. Build and install PX Dictate.app
+
+Flags: `--yes` (skip confirmations), `--model small` (pre-select model), `--no-build` (deps only).
+
+### Option B: Manual Install
+
+#### Prerequisites
 
 - **Python 3.9+** (pre-installed on macOS)
 - **[Homebrew](https://brew.sh)** (macOS package manager)
 
-### 1. Install dependencies
+#### 1. Install dependencies
 
 ```bash
 brew install whisper-cpp portaudio ffmpeg
 pip3 install pyaudio rumps pyobjc
 ```
 
-### 2. Download the Whisper model (~465MB, one-time)
+#### 2. Download the Whisper model (~465MB, one-time)
 
 ```bash
 mkdir -p ~/.px-dictate/models
@@ -67,7 +84,7 @@ curl -L -o ~/.px-dictate/models/ggml-small.bin \
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
 ```
 
-### 3. Run
+#### 3. Run
 
 ```bash
 python3 px_dictate_app.py
@@ -143,11 +160,13 @@ This is the first open-source project from PX Innovative. We're building in publ
 ## Roadmap
 
 - [x] Model selector (tiny/base/small/medium/large — choose quality vs speed)
+- [x] One-command installer (`install.sh` — interactive, step-by-step)
 - [ ] Custom vocabulary / domain-specific terms
-- [ ] One-click installer (install.sh — no manual steps)
+- [ ] Theme system (Classic / Glass / Minimal skins)
 - [ ] OpenAI Whisper API fallback for older Macs
 - [ ] Homebrew cask (`brew install --cask px-dictate`)
 - [ ] .dmg installer
+- [ ] Code signing & notarization (Apple Developer)
 - [ ] Mac App Store release
 
 ## Support
