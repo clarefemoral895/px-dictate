@@ -1156,8 +1156,8 @@ class RecordingSession:
     def duration_str(self):
         if not self.end_time:
             return "ongoing"
-        d = (self.end_time - self.start_time).total_seconds()
-        m, s = divmod(int(d), 60)
+        d = round((self.end_time - self.start_time).total_seconds())
+        m, s = divmod(d, 60)
         return f"{m}m {s}s" if m else f"{s}s"
 
     def format_transcript(self):
@@ -2137,6 +2137,8 @@ class PXDictateApp(rumps.App):
         self.history = collections.deque(maxlen=HISTORY_MAX)
         self._collecting = False
         self._hold_active = False
+        self._pending_segments = 0       # count of in-flight _process_segment threads
+        self._segments_lock = threading.Lock()
         self._guide_window = None
         self._guide_btn = None
         self._cmd_q_monitor = None
@@ -2907,6 +2909,15 @@ class PXDictateApp(rumps.App):
                 ).start()
 
     def _process_segment(self, frames, seg_time=None):
+        with self._segments_lock:
+            self._pending_segments += 1
+        try:
+            self._process_segment_inner(frames, seg_time)
+        finally:
+            with self._segments_lock:
+                self._pending_segments -= 1
+
+    def _process_segment_inner(self, frames, seg_time=None):
         min_frames = int(SAMPLE_RATE / CHUNK * 0.5)
         if len(frames) < min_frames:
             if self.paused:
@@ -2982,20 +2993,32 @@ class PXDictateApp(rumps.App):
 
         remaining = list(self.frames)
         self.frames = []
+        seg_time = datetime.datetime.now()  # capture recording-end time before whisper
 
         if self.session:
             self.session.add_frames(remaining)
-            self.session.stop()
+            self.session.stop()  # end_time = when user stopped recording
 
         if remaining:
-            threading.Thread(target=self._transcribe_final, args=(remaining,), daemon=True).start()
-        elif self.session and self.session.full_text:
+            threading.Thread(target=self._transcribe_final, args=(remaining, seg_time), daemon=True).start()
+        else:
+            # No new frames — but wait for any in-flight pause segments to finish
+            threading.Thread(target=self._wait_and_finalize, daemon=True).start()
+
+    def _wait_and_finalize(self):
+        """Wait for in-flight _process_segment threads, then finalize."""
+        for _ in range(100):  # max ~10 seconds
+            with self._segments_lock:
+                if self._pending_segments == 0:
+                    break
+            time.sleep(0.1)
+        if self.session and self.session.full_text:
             self._finalize_session()
         else:
             self.widget.collapse()
             self._set_title("🎙️")
 
-    def _transcribe_final(self, frames):
+    def _transcribe_final(self, frames, seg_time=None):
         tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
         try:
             with wave.open(tmp.name, "wb") as wf:
@@ -3013,10 +3036,17 @@ class PXDictateApp(rumps.App):
 
         if text:
             if self.session:
-                self.session.add_segment(text)
+                self.session.add_segment(text, timestamp=seg_time)
             if self.auto_paste:
                 paste_to_active_app(text)
                 play_sound("pasted")
+
+        # Wait for any in-flight pause segments before finalizing
+        for _ in range(100):  # max ~10 seconds
+            with self._segments_lock:
+                if self._pending_segments == 0:
+                    break
+            time.sleep(0.1)
 
         self._finalize_session()
 
@@ -3025,6 +3055,8 @@ class PXDictateApp(rumps.App):
         self.session = None
 
         if session:
+            if not session.end_time:
+                session.stop()  # fallback for pause→stop (no remaining frames)
             _log.info("Finalizing session: %d segments, full_text=%d chars",
                       len(session.segments), len(session.full_text))
 
