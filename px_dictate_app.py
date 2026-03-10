@@ -155,6 +155,7 @@ CTRL_FLAG = 0x40000
 OPT_FLAG = 0x80000
 ESC_KEYCODE = 53
 Q_KEYCODE = 12
+R_KEYCODE = 15
 CMD_FLAG = 0x100000
 V_KEYCODE = 9
 CTRL_TAP_THRESHOLD = 1.0
@@ -1202,7 +1203,7 @@ class RecordingSession:
 # ── Hotkey Manager ──────────────────────────────────────────────────────
 
 class HotkeyManager:
-    def __init__(self, on_toggle, on_pause, on_hold_start, on_hold_stop, on_hold_msg, on_stop, on_quit=None):
+    def __init__(self, on_toggle, on_pause, on_hold_start, on_hold_stop, on_hold_msg, on_stop, on_quit=None, on_restart=None):
         self.on_toggle = on_toggle
         self.on_pause = on_pause
         self.on_hold_start = on_hold_start
@@ -1210,6 +1211,7 @@ class HotkeyManager:
         self.on_hold_msg = on_hold_msg
         self.on_stop = on_stop
         self.on_quit = on_quit
+        self.on_restart = on_restart
         self._fn_down_time = None
         self._fn_hold_mode = False
         self._fn_hold_paused = False
@@ -1279,6 +1281,12 @@ class HotkeyManager:
                 self.on_stop()
                 return None
 
+            # Cmd+R = restart
+            if keycode == R_KEYCODE and bool(flags & CMD_FLAG):
+                if self.on_restart:
+                    self.on_restart()
+                return None
+
             # Cmd+Q = quit
             if keycode == Q_KEYCODE and bool(flags & CMD_FLAG):
                 if self.on_quit:
@@ -1317,6 +1325,9 @@ class HotkeyManager:
                         self.on_hold_stop()
                     elif was_hold and was_paused:
                         pass
+                    elif self.recording_active:
+                        # Stop immediately — no threshold delay when stopping
+                        self.on_toggle()
                     elif held >= FN_HOLD_THRESHOLD:
                         self.on_toggle()
 
@@ -2119,6 +2130,7 @@ class PXDictateApp(rumps.App):
         self._click_triggered = False
         self._stop_triggered = False
         self._quit_triggered = False
+        self._restart_triggered = False
         self._hold_start_triggered = False
         self._hold_stop_triggered = False
         self._hold_msg_triggered = False
@@ -2137,6 +2149,7 @@ class PXDictateApp(rumps.App):
             on_hold_msg=self._on_hold_msg,
             on_stop=self._on_stop,
             on_quit=self._on_quit,
+            on_restart=self._on_restart,
         )
         self.hotkey_mgr.toggle_key = self.prefs.get("hotkey")
 
@@ -2199,6 +2212,7 @@ class PXDictateApp(rumps.App):
             self._build_help_menu(),
             self._build_feedback_menu(),
             rumps.MenuItem(f"About {APP_NAME}", callback=self.show_about),
+            rumps.MenuItem("Restart (\u2318R)", callback=self.restart_app),
             rumps.MenuItem("Quit (\u2318Q)", callback=self.quit_app),
         ]
 
@@ -2305,6 +2319,9 @@ class PXDictateApp(rumps.App):
     def _on_quit(self):
         self._quit_triggered = True
 
+    def _on_restart(self):
+        self._restart_triggered = True
+
     @rumps.timer(0.1)
     def check_hotkeys(self, _):
         if self._toggle_triggered:
@@ -2341,6 +2358,9 @@ class PXDictateApp(rumps.App):
                     if self.recording and self._collecting and not self.paused:
                         self.widget._start_alternation()
                 threading.Thread(target=_resume, daemon=True).start()
+        if self._restart_triggered:
+            self._restart_triggered = False
+            self.restart_app(None)
         if self._quit_triggered:
             self._quit_triggered = False
             self.quit_app(None)
@@ -3028,6 +3048,20 @@ class PXDictateApp(rumps.App):
         time.sleep(FINALIZE_DELAY)
         self.widget.collapse()
         self._set_title("🎙️")
+
+    def restart_app(self, sender):
+        """Quit and relaunch the app."""
+        self.recording = False
+        self._collecting = False
+        self.hotkey_mgr.recording_active = False
+        self.audio_mgr.shutdown()
+        # Relaunch: use the bundle path if running as .app, otherwise the script
+        bundle = AppKit.NSBundle.mainBundle().bundlePath()
+        if bundle.endswith(".app"):
+            subprocess.Popen(["open", "-n", bundle])
+        else:
+            subprocess.Popen([sys.executable, __file__])
+        rumps.quit_application()
 
     def quit_app(self, sender):
         self.recording = False
