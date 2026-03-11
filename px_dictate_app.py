@@ -1281,17 +1281,16 @@ class HotkeyManager:
                 self.on_stop()
                 return None
 
-            # Cmd+R = restart
-            if keycode == R_KEYCODE and bool(flags & CMD_FLAG):
-                if self.on_restart:
-                    self.on_restart()
-                return None
-
-            # Cmd+Q = quit
-            if keycode == Q_KEYCODE and bool(flags & CMD_FLAG):
-                if self.on_quit:
-                    self.on_quit()
-                return None
+            # Cmd+R = restart, Cmd+Q = quit — only when OUR app is frontmost
+            if bool(flags & CMD_FLAG) and keycode in (R_KEYCODE, Q_KEYCODE):
+                front = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
+                if front and front.bundleIdentifier() == APP_BUNDLE_ID:
+                    if keycode == R_KEYCODE and self.on_restart:
+                        self.on_restart()
+                        return None
+                    if keycode == Q_KEYCODE and self.on_quit:
+                        self.on_quit()
+                        return None
 
             if self._ctrl_down_time is not None:
                 self._ctrl_had_keydown = True
